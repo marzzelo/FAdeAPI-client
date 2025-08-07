@@ -1,0 +1,5 @@
+PySide6
+httpx
+keyring
+python-jose
+packaging

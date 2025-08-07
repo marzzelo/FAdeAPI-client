@@ -7,12 +7,17 @@ class LoginDialog(QDialog):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("FADEAPI – Login")
-        self.u = QLineEdit(); self.u.setPlaceholderText("Usuario")
-        self.p = QLineEdit(); self.p.setEchoMode(QLineEdit.Password); self.p.setPlaceholderText("Contraseña")
+        self.u = QLineEdit()
+        self.u.setPlaceholderText("Usuario")
+        self.p = QLineEdit()
+        self.p.setEchoMode(QLineEdit.Password)
+        self.p.setPlaceholderText("Contraseña")
         self.btn = QPushButton("Ingresar")
-        lay = QVBoxLayout(self); 
+        lay = QVBoxLayout(self)
         lay.addWidget(QLabel("Ingrese sus credenciales"))
-        lay.addWidget(self.u); lay.addWidget(self.p); lay.addWidget(self.btn)
+        lay.addWidget(self.u)
+        lay.addWidget(self.p)
+        lay.addWidget(self.btn)
         self.btn.clicked.connect(self._do_login)
         self.ok = False
         self.username = None

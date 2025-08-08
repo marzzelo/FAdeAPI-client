@@ -1,0 +1,2 @@
+$>  pipenv run pyinstaller  --noconfirm --onedir --windowed   --name "FADEAPI-Client"   --icon assets\icon.ico   --collect-submodules PySide6   --collect-data PySide6   app.py
+# This command builds the FADEAPI-Client application using PyInstaller with the specified options.

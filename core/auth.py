@@ -1,5 +1,4 @@
 import keyring
-import time
 from typing import Optional
 import httpx
 

@@ -16,6 +16,11 @@ from PySide6.QtWidgets import QMessageBox, QPushButton
 
 class RegistrosTab(QWidget):
     def __init__(self, api: ApiClient):
+        """Inicializa la pestaña de Registros.
+
+        Args:
+            api (ApiClient): Cliente de la API autenticado que se utilizará para las operaciones.
+        """
         super().__init__()
         self.api = api
 
@@ -44,6 +49,14 @@ class RegistrosTab(QWidget):
         lay.addWidget(self.table)
 
     async def load(self):
+        """Carga registros desde la API y los muestra en la tabla.
+
+        Ajusta dinámicamente las columnas según la cantidad de sensores por registro y
+        maneja errores mostrando un QMessageBox.
+
+        Returns:
+            None
+        """
         try:
             data = await self.api.get_registros(limit=self.limit.value(), hasta_iso=self.hasta.text().strip() or None)
             # data: [{ "ts": "...", "sensores": [..] }, ...]
@@ -63,6 +76,13 @@ class RegistrosTab(QWidget):
             QMessageBox.critical(self, "Error", f"No se pudieron cargar registros:\n{e}")
 
     def download_csv(self):
+        """Descarga el CSV de registros desde la API y lo guarda en disco.
+
+        Abre un diálogo de guardado, solicita el archivo a la API y notifica el resultado.
+
+        Returns:
+            None
+        """
         path, _ = QFileDialog.getSaveFileName(self, "Guardar CSV", "registros.csv", "CSV (*.csv)")
         if not path:
             return
@@ -75,6 +95,13 @@ class RegistrosTab(QWidget):
             QMessageBox.critical(self, "Error", f"No se pudo descargar CSV:\n{e}")
 
     def delete_all(self):
+        """Elimina todos los registros tras confirmación del usuario.
+
+        Solicita confirmación, ejecuta el borrado mediante la API y recarga la tabla.
+
+        Returns:
+            None
+        """
         if QMessageBox.question(self, "Confirmar", "¿Eliminar TODOS los registros? Esta acción no se puede deshacer.") != QMessageBox.Yes:
             return
         try:
@@ -87,6 +114,11 @@ class RegistrosTab(QWidget):
 
 class UsuariosTab(QWidget):
     def __init__(self, api: ApiClient):
+        """Inicializa la pestaña de administración de usuarios.
+
+        Args:
+            api (ApiClient): Cliente de la API autenticado que se utilizará para gestionar usuarios.
+        """
         super().__init__()
         self.api = api
 
@@ -146,12 +178,24 @@ class UsuariosTab(QWidget):
         lay.addWidget(grp_edit)
 
     async def _ensure_admin(self):
+        """Verifica que el usuario actual tenga rol de administrador.
+
+        Raises:
+            RuntimeError: Si el usuario autenticado no es administrador.
+        """
         me = await self.api.get_me()
         role = me.get("role", "user")
         if role != "admin":
             raise RuntimeError("Sólo un administrador puede acceder a esta sección.")
 
     async def load(self):
+        """Obtiene la lista de usuarios desde la API y la muestra en la tabla.
+
+        Requiere privilegios de administrador. Maneja errores mostrando un QMessageBox.
+
+        Returns:
+            None
+        """
         try:
             await self._ensure_admin()
             users = await self.api.list_usuarios()
@@ -168,6 +212,11 @@ class UsuariosTab(QWidget):
             QMessageBox.critical(self, "Error", f"No se pudo listar usuarios:\n{e}")
 
     def _on_table_select(self):
+        """Rellena el formulario de edición con los datos del usuario seleccionado en la tabla.
+
+        Returns:
+            None
+        """
         rows = self.table.selectionModel().selectedRows()
         if not rows:
             return
@@ -180,6 +229,13 @@ class UsuariosTab(QWidget):
         # is_active en col 6 (no lo ponemos en el form por defecto)
 
     def create_user(self):
+        """Crea un nuevo usuario con los datos del formulario.
+
+        Construye el payload, llama a la API, muestra el resultado y recarga la lista.
+
+        Returns:
+            None
+        """
         payload = {
             "username": self.u_username.text().strip(),
             "password": self.u_password.text(),
@@ -199,6 +255,13 @@ class UsuariosTab(QWidget):
             QMessageBox.critical(self, "Error", f"No se pudo crear:\n{e}")
 
     def update_user(self):
+        """Actualiza el usuario seleccionado with los campos modificados en el formulario.
+
+        Solo envía los campos presentes. Muestra el resultado y recarga la lista.
+
+        Returns:
+            None
+        """
         if not self.e_id.text():
             QMessageBox.information(self, "Atención", "Seleccioná primero un usuario en la tabla.")
             return
@@ -219,6 +282,14 @@ class UsuariosTab(QWidget):
 
 class MainWindow(QMainWindow):
     def __init__(self, username: str):
+        """Crea la ventana principal de la aplicación.
+
+        Configura las pestañas (Status, Registros, Usuarios), el diálogo Acerca de y
+        el verificador de actualizaciones.
+
+        Args:
+            username (str): Nombre de usuario autenticado para inicializar el ApiClient.
+        """
         super().__init__()
         self.setWindowTitle("FADEAPI Client")
         self.api = ApiClient(username)
@@ -257,6 +328,13 @@ class MainWindow(QMainWindow):
         
 
     def _build_status_tab(self):
+        """Construye y devuelve la pestaña de estado del servidor.
+
+        Incluye un botón para consultar /status y una etiqueta para mostrar la respuesta.
+
+        Returns:
+            QWidget: Contenedor con controles de la pestaña de estado.
+        """
         w = QWidget(); lay = QVBoxLayout(w)
         label = QLabel("Servidor: (sin consultar)")
         btn = QPushButton("Consultar /status")

@@ -9,6 +9,8 @@ httpx = "*"
 keyring = "*"
 python-jose = "*"
 packaging = "*"
+pyqtgraph = "*"
+numpy = "*"
 
 [dev-packages]
 pyinstaller = "*"

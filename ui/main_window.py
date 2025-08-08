@@ -1,115 +1,137 @@
 # ui/main_window.py
+import asyncio
+import numpy as np
+import pyqtgraph as pg
+from core.api import ApiClient
+from core.workers import run_bg
+from ui.about import AboutDialog
+from core.__version__ import VERSION
+from core.updater import check_update, open_release
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QTabWidget, QVBoxLayout, QPushButton, QLabel,
     QMessageBox, QHBoxLayout, QTableWidget, QTableWidgetItem, QFileDialog,
     QSpinBox, QLineEdit, QFormLayout, QGroupBox, QAbstractItemView
 )
-from PySide6.QtCore import Qt
-from ui.about import AboutDialog
-from core.api import ApiClient
-import asyncio
 
-from core.__version__ import VERSION
-from core.updater import check_update, open_release
-import asyncio
-from PySide6.QtWidgets import QMessageBox, QPushButton
-
+# flake8: noqa: E701,E702
 class RegistrosTab(QWidget):
     def __init__(self, api: ApiClient):
-        """Inicializa la pestaña de Registros.
-
-        Args:
-            api (ApiClient): Cliente de la API autenticado que se utilizará para las operaciones.
-        """
         super().__init__()
         self.api = api
 
         self.table = QTableWidget(0, 0)
         self.table.setAlternatingRowColors(True)
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
 
-        self.limit = QSpinBox(); self.limit.setRange(1, 10000); self.limit.setValue(50)
+        self.limit = QSpinBox(); self.limit.setRange(1, 10000); self.limit.setValue(200)
         self.hasta = QLineEdit(); self.hasta.setPlaceholderText("YYYY-MM-DDTHH:MM:SS (opcional)")
 
         btn_refresh = QPushButton("Actualizar")
         btn_csv     = QPushButton("Descargar CSV")
         btn_delete  = QPushButton("Borrar TODOS (admin)")
 
-        btn_refresh.clicked.connect(lambda: asyncio.run(self.load()))
-        btn_csv.clicked.connect(self.download_csv)
-        btn_delete.clicked.connect(self.delete_all)
+        btn_refresh.clicked.connect(self.load_async)
+        btn_csv.clicked.connect(self.download_csv_async)
+        btn_delete.clicked.connect(self.delete_all_async)
 
         top = QHBoxLayout()
         top.addWidget(QLabel("limit:")); top.addWidget(self.limit)
         top.addWidget(QLabel("hasta:")); top.addWidget(self.hasta)
         top.addStretch(1); top.addWidget(btn_refresh); top.addWidget(btn_csv); top.addWidget(btn_delete)
 
+        # === Plot ===
+        self.plot = pg.PlotWidget()
+        self.plot.showGrid(x=True, y=True, alpha=0.2)
+        self.plot.addLegend()
+        self.plot.setLabel("left", "Valor")
+        self.plot.setLabel("bottom", "Tiempo")
+        # Eje temporal (opcional): se puede usar DateAxisItem si preferís, por simplicidad dejamos el eje default
+
         lay = QVBoxLayout(self)
         lay.addLayout(top)
-        lay.addWidget(self.table)
+        lay.addWidget(self.plot)   # 👈 gráfico arriba
+        lay.addWidget(self.table)  # tabla abajo
 
-    async def load(self):
-        """Carga registros desde la API y los muestra en la tabla.
+    # ---------- Helpers UI-safe ----------
+    def _err(self, msg: str):
+        QMessageBox.critical(self, "Error", msg)
 
-        Ajusta dinámicamente las columnas según la cantidad de sensores por registro y
-        maneja errores mostrando un QMessageBox.
+    def _update_ui_with_data(self, data: list[dict]):
+        # Tabla
+        max_s = max((len(r.get("sensores", [])) for r in data), default=0)
+        headers = ["ts"] + [f"s{i+1}" for i in range(max_s)]
+        self.table.setRowCount(len(data))
+        self.table.setColumnCount(len(headers))
+        self.table.setHorizontalHeaderLabels(headers)
+        for row, r in enumerate(data):
+            self.table.setItem(row, 0, QTableWidgetItem(str(r.get("ts",""))))
+            sensores = r.get("sensores", [])
+            for i in range(max_s):
+                val = "" if i >= len(sensores) else str(sensores[i])
+                self.table.setItem(row, i+1, QTableWidgetItem(val))
+        self.table.resizeColumnsToContents()
 
-        Returns:
-            None
-        """
-        try:
-            data = await self.api.get_registros(limit=self.limit.value(), hasta_iso=self.hasta.text().strip() or None)
-            # data: [{ "ts": "...", "sensores": [..] }, ...]
-            max_s = max((len(r.get("sensores", [])) for r in data), default=0)
-            headers = ["ts"] + [f"s{i+1}" for i in range(max_s)]
-            self.table.setRowCount(len(data))
-            self.table.setColumnCount(len(headers))
-            self.table.setHorizontalHeaderLabels(headers)
-            for row, r in enumerate(data):
-                self.table.setItem(row, 0, QTableWidgetItem(str(r.get("ts",""))))
-                sensores = r.get("sensores", [])
-                for i in range(max_s):
-                    val = "" if i >= len(sensores) else str(sensores[i])
-                    self.table.setItem(row, i+1, QTableWidgetItem(val))
-            self.table.resizeColumnsToContents()
-        except Exception as e:
-            QMessageBox.critical(self, "Error", f"No se pudieron cargar registros:\n{e}")
-
-    def download_csv(self):
-        """Descarga el CSV de registros desde la API y lo guarda en disco.
-
-        Abre un diálogo de guardado, solicita el archivo a la API y notifica el resultado.
-
-        Returns:
-            None
-        """
-        path, _ = QFileDialog.getSaveFileName(self, "Guardar CSV", "registros.csv", "CSV (*.csv)")
-        if not path:
+        # Plot
+        self.plot.clear()
+        if not data:
             return
-        try:
-            content = asyncio.run(self.api.download_csv())
-            with open(path, "wb") as f:
-                f.write(content)
-            QMessageBox.information(self, "OK", f"CSV guardado en:\n{path}")
-        except Exception as e:
-            QMessageBox.critical(self, "Error", f"No se pudo descargar CSV:\n{e}")
 
-    def delete_all(self):
-        """Elimina todos los registros tras confirmación del usuario.
+        # Convertir ts ISO → epoch (segundos)
+        def to_epoch(ts_str: str) -> float:
+            from datetime import datetime, timezone
+            s = ts_str.replace("Z", "+00:00")
+            try:
+                dt = datetime.fromisoformat(s)
+            except ValueError:
+                dt = datetime.strptime(ts_str, "%Y-%m-%dT%H:%M:%S")
+                dt = dt.replace(tzinfo=timezone.utc)
+            return dt.timestamp()
 
-        Solicita confirmación, ejecuta el borrado mediante la API y recarga la tabla.
+        xs = np.array([to_epoch(r["ts"]) for r in data], dtype=float)
 
-        Returns:
-            None
-        """
+        # Crear series por sensor
+        for idx in range(max_s):
+            ys = []
+            for r in data:
+                sensores = r.get("sensores", [])
+                ys.append(float(sensores[idx]) if idx < len(sensores) else np.nan)
+            ys = np.array(ys, dtype=float)
+            self.plot.plot(xs, ys, pen=pg.intColor(idx), name=f"s{idx+1}", connect="finite")
+
+        # Zoom a datos
+        self.plot.enableAutoRange()
+
+    # ---------- Background actions ----------
+    def load_async(self):
+        limit = self.limit.value()
+        hasta_str = self.hasta.text().strip() or None
+        # correr la corrutina en un thread:
+        run_bg(lambda: asyncio.run(self.api.get_registros(limit=limit, hasta_iso=hasta_str)),
+               on_result=self._update_ui_with_data,
+               on_error=self._err)
+
+    def download_csv_async(self):
+        def work():
+            return asyncio.run(self.api.download_csv())
+        def done(content: bytes):
+            path, _ = QFileDialog.getSaveFileName(self, "Guardar CSV", "registros.csv", "CSV (*.csv)")
+            if not path:
+                return
+            try:
+                with open(path, "wb") as f:
+                    f.write(content)
+                QMessageBox.information(self, "OK", f"CSV guardado en:\n{path}")
+            except Exception as e:
+                self._err(str(e))
+        run_bg(work, on_result=done, on_error=self._err)
+
+    def delete_all_async(self):
         if QMessageBox.question(self, "Confirmar", "¿Eliminar TODOS los registros? Esta acción no se puede deshacer.") != QMessageBox.Yes:
             return
-        try:
-            res = asyncio.run(self.api.delete_registros())
-            QMessageBox.information(self, "OK", str(res))
-            asyncio.run(self.load())
-        except Exception as e:
-            QMessageBox.critical(self, "Error", f"No se pudo eliminar:\n{e}")
+        run_bg(lambda: asyncio.run(self.api.delete_registros()),
+               on_result=lambda _: self.load_async(),
+               on_error=self._err)
 
 
 class UsuariosTab(QWidget):

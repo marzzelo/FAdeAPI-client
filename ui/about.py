@@ -9,6 +9,7 @@ class AboutDialog(QDialog):
             f"<b>FADEAPI Client v{VERSION}</b><br>"
             "Autor: Marcelo A. Valdez · Contacto: <i>valdez@fadeasa.com.ar</i><br>"
             "Colabora: <i>Arisa</i><br>"
-            "© Derechos reservados"
+            "© FAdeA - Todos los Derechos reservados"
         )
-        lay = QVBoxLayout(self); lay.addWidget(QLabel(t))
+        lay = QVBoxLayout(self)
+        lay.addWidget(QLabel(t))

@@ -9,6 +9,11 @@ from ui.about import AboutDialog
 from core.api import ApiClient
 import asyncio
 
+from core.__version__ import VERSION
+from core.updater import check_update, open_release
+import asyncio
+from PySide6.QtWidgets import QMessageBox, QPushButton
+
 class RegistrosTab(QWidget):
     def __init__(self, api: ApiClient):
         super().__init__()
@@ -226,9 +231,30 @@ class MainWindow(QMainWindow):
         about_btn = QPushButton("Acerca de")
         about_btn.clicked.connect(lambda: AboutDialog().exec())
 
+        update_btn = QPushButton("Buscar actualizaciones")
+
+        def _check_updates():
+            try:
+                hay, latest, url = asyncio.run(check_update(VERSION))
+                if hay:
+                    if QMessageBox.question(
+                        self, "Actualización disponible",
+                        f"Versión instalada: {VERSION}\nÚltima versión: {latest}\n\n¿Abrir la página de descarga?"
+                    ) == QMessageBox.Yes:
+                        open_release(url)
+                else:
+                    QMessageBox.information(self, "Actualizaciones", "Estás en la última versión.")
+            except Exception as e:
+                QMessageBox.warning(self, "Actualizaciones", f"No se pudo verificar:\n{e}")
+
+        update_btn.clicked.connect(_check_updates)
+
         c = QWidget(); lay = QVBoxLayout(c)
         lay.addWidget(tabs); lay.addWidget(about_btn)
+        lay.addWidget(update_btn)
         self.setCentralWidget(c)
+
+        
 
     def _build_status_tab(self):
         w = QWidget(); lay = QVBoxLayout(w)

@@ -2,13 +2,20 @@ import sys
 from PySide6.QtWidgets import QApplication
 from ui.login import LoginDialog
 from ui.main_window import MainWindow
+import PySide6.QtNetwork
+
+try:
+    import truststore
+    truststore.inject_into_ssl()
+except Exception:
+    pass
 
 def main():
     app = QApplication(sys.argv)
     dlg = LoginDialog()
     if dlg.exec() == 0 or not dlg.ok:
         sys.exit(0)
-    mw = MainWindow(dlg.username)
+    mw = MainWindow(dlg.username) # type: ignore
     mw.show()
     sys.exit(app.exec())
 

@@ -12,6 +12,7 @@ packaging = "*"
 
 [dev-packages]
 pyinstaller = "*"
+pyinstaller-hooks-contrib = "*"
 
 [requires]
 python_version = "3.13"

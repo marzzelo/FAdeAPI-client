@@ -11,6 +11,7 @@ python-jose = "*"
 packaging = "*"
 pyqtgraph = "*"
 numpy = "*"
+matplotlib = "*"
 
 [dev-packages]
 pyinstaller = "*"

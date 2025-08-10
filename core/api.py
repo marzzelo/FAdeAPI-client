@@ -70,21 +70,24 @@ class ApiClient:
             return r
 
     # -------- Registros --------
-    async def get_registros(self, limit: int = 50, hasta_iso: str | None = None):
+    async def get_registros(self, limit: int = 100, desde_iso: str | None = None, hasta_iso: str | None = None):
         """Obtiene registros con paginado y filtro opcional por fecha/hora.
 
         Args:
             limit (int): Cantidad máxima de registros a devolver.
+            desde_iso (str | None): Fecha/hora ISO límite inferior (opcional).
             hasta_iso (str | None): Fecha/hora ISO límite superior (opcional).
 
         Returns:
             list[dict]: Lista de registros con campos como 'ts' y 'sensores'.
         """
         params = {"limit": limit}
+        if desde_iso:
+            params["desde"] = desde_iso
         if hasta_iso:
             params["hasta"] = hasta_iso
         r = await self.request("GET", "registros/", params=params)
-        return r.json()  # [{ts, sensores}, ...]
+        return r.json()
 
     async def download_csv(self) -> bytes:
         """Descarga el CSV de registros.
@@ -146,3 +149,4 @@ class ApiClient:
         """
         r = await self.request("PUT", f"usuarios/{user_id}", json=payload)
         return r.json()
+    

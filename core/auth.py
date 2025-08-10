@@ -13,6 +13,18 @@ def load_tokens(username: str) -> tuple[Optional[str], Optional[str]]:
         keyring.get_password(SERVICE, f"{username}:access"),
         keyring.get_password(SERVICE, f"{username}:refresh"),
     )
+    
+# core/auth.py
+def delete_tokens(username: str):
+    try:
+        keyring.delete_password(SERVICE, f"{username}:access")
+    except Exception:
+        pass
+    try:
+        keyring.delete_password(SERVICE, f"{username}:refresh")
+    except Exception:
+        pass
+
 
 async def login(base_url: str, username: str, password: str) -> tuple[str, str]:
     async with httpx.AsyncClient(base_url=base_url, timeout=30) as c:

@@ -1,5 +1,11 @@
-PySide6
+pyside6
+requests
 httpx
 keyring
 python-jose
 packaging
+pyqtgraph
+numpy
+tzdata
+truststore
+matplotlib

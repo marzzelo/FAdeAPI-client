@@ -5,15 +5,16 @@ name = "pypi"
 
 [packages]
 pyside6 = "*"
+requests = "*"
 httpx = "*"
 keyring = "*"
 python-jose = "*"
 packaging = "*"
 pyqtgraph = "*"
 numpy = "*"
-matplotlib = "*"
 tzdata = "*"
 truststore = "*"
+matplotlib = "*"
 
 [dev-packages]
 pyinstaller = "*"

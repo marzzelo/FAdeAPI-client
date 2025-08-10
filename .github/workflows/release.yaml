@@ -9,7 +9,6 @@ on:
 jobs:
   build-win:
     runs-on: windows-latest
-
     env:
       APP_NAME: FADEAPI-Client
       PYTHON_VERSION: "3.11"
@@ -30,7 +29,7 @@ jobs:
           key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
           restore-keys: ${{ runner.os }}-pip-
 
-      - name: Install deps
+      - name: Install dependencies
         run: |
           python -m pip install -U pip wheel
           if (Test-Path "requirements.txt") {
@@ -47,21 +46,20 @@ jobs:
 
       - name: Extract version from core/__version__.py
         id: ver
-        shell: python
+        shell: pwsh
         run: |
-          import re, sys, pathlib, os
-          p = pathlib.Path("core/__version__.py")
-          m = re.search(r'VERSION\s*=\s*"([^"]+)"', p.read_text())
-          v = m.group(1) if m else "0.0.0"
-          print(f"::set-output name=version::{v}")
-        # set-output es legacy; usar $GITHUB_OUTPUT:
-        # run: |
-        #  ...; open(os.environ["GITHUB_OUTPUT"],"a").write(f"version={v}\n")
+          $content = Get-Content -Raw core/__version__.py
+          if ($content -match 'VERSION\s*=\s*"(.*?)"') {
+            $ver = $Matches[1]
+            "version=$ver" >> $env:GITHUB_OUTPUT
+          } else {
+            Write-Error "VERSION not found in core/__version__.py"
+          }
 
       - name: Verify tag matches version
         shell: bash
         run: |
-          TAG="${GITHUB_REF_NAME}"           # e.g. v0.1.2
+          TAG="${GITHUB_REF_NAME}"            # e.g. v0.2.0
           VER="${{ steps.ver.outputs.version }}"
           TAG_STRIPPED="${TAG#v}"
           echo "Tag: $TAG  Version: $VER"
@@ -86,10 +84,9 @@ jobs:
           $ver = "${{ steps.ver.outputs.version }}"
           $zipName = "$env:APP_NAME" + "_v" + $ver + "_win64.zip"
           Compress-Archive -Path "dist/$env:APP_NAME/*" -DestinationPath $zipName
-          echo "Zipped: $zipName"
-          echo "ZIP_NAME=$zipName" >> $env:GITHUB_ENV
+          "ZIP_NAME=$zipName" >> $env:GITHUB_ENV
 
-            - name: Install Inno Setup
+      - name: Install Inno Setup
         shell: pwsh
         run: choco install innosetup -y
 
@@ -97,19 +94,18 @@ jobs:
         shell: pwsh
         run: |
           $ver = "${{ steps.ver.outputs.version }}"
-          # Pasar la versión al script con /DAppVersion
           & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" `
             "/DAppVersion=$ver" `
             "installer\FADEAPI-Client.iss"
-          # Mover el .exe de Output a raíz del workspace
-          Get-ChildItem -Path installer\Output\*.exe | Copy-Item -Destination .
+          Copy-Item installer\Output\*.exe -Destination .
 
-
-      - name: Upload build artifact (CI)
+      - name: Upload artifact (zip + installer)
         uses: actions/upload-artifact@v4
         with:
           name: ${{ env.APP_NAME }}-win64
-          path: ${{ env.ZIP_NAME }}
+          path: |
+            ${{ env.ZIP_NAME }}
+            *.exe
 
   release:
     needs: build-win

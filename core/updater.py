@@ -72,8 +72,10 @@ def _updates_dir() -> str:
     os.makedirs(d, exist_ok=True)
     return d
 
-async def download_latest_asset(version: str) -> str:
-    """Descarga el asset preferido del release más reciente y devuelve la ruta local."""
+async def download_latest_asset(version: str, progress_cb: Optional[callable] = None) -> str:
+    """Descarga el asset del último release y devuelve la ruta local.
+    progress_cb: callable(percent:int) opcional (0..100)
+    """
     j = await _get_latest_release_json()
     assets = j.get("assets") or []
     a = _pick_asset(assets, version, prefer_installer=True)
@@ -87,11 +89,21 @@ async def download_latest_asset(version: str) -> str:
     async with httpx.AsyncClient(timeout=None, follow_redirects=True) as c:
         async with c.stream("GET", url) as r:
             r.raise_for_status()
+            total = int(r.headers.get("content-length") or 0)
+            done = 0
             with open(out_path, "wb") as f:
                 async for chunk in r.aiter_bytes(1024 * 128):
                     f.write(chunk)
-
+                    done += len(chunk)
+                    if progress_cb and total > 0:
+                        try:
+                            progress_cb(int(done * 100 / total))
+                        except Exception:
+                            pass
+            if progress_cb:
+                progress_cb(100)
     return out_path
+
 
 def run_installer(path: str):
     """Ejecuta el instalador (si es .exe, en modo silencioso) y sale de la app."""

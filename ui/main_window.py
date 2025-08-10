@@ -26,15 +26,16 @@ from PySide6.QtWidgets import (
     QCheckBox,
     QTextEdit,
     QDialog,
+    QProgressDialog,
 )
 
 from core.api import ApiClient
 from core.workers import run_bg
 from core.__version__ import VERSION
-from core.updater import check_update, download_and_get_path_sync, run_installer
+from core.updater import check_update, download_and_get_path_sync, download_latest_asset, run_installer
 from ui.about import AboutDialog
 
-from PySide6.QtCore import Signal
+from PySide6.QtCore import Signal, QObject
 from core.config import Config
 
 
@@ -381,16 +382,27 @@ class RegistrosTab(QWidget):
         limit = self.limit.value()
         hasta_str = self.hasta.text().strip() or None
         desde_iso = self._max_ts_plus_eps_iso()  # incremental
+        
+        busy = QProgressDialog("Actualizando registros...", None, 0, 0, self)
+        busy.setWindowTitle("Por favor, espere")
+        busy.setCancelButton(None)
+        busy.setAutoClose(True)
+        busy.setMinimumDuration(0)
+        busy.show()
 
         def work():
-            # usa API con desde/hasta
             return asyncio.run(self.api.get_registros(limit=limit, desde_iso=desde_iso, hasta_iso=hasta_str))
 
         def done(new_data: list[dict]):
-            self._merge_new_data(new_data)
-            self._update_table()
+            try:
+                self._merge_new_data(new_data)
+                self._update_table()
+            finally:
+                busy.close()
 
-        run_bg(work, on_result=done, on_error=self._err)
+        run_bg(work,
+           on_result=done,
+           on_error=lambda err: (busy.close(), self._err(err)))
 
     def download_csv_async(self):
         def work(): return asyncio.run(self.api.download_csv())
@@ -412,6 +424,9 @@ class RegistrosTab(QWidget):
             self._update_table()
         run_bg(lambda: asyncio.run(self.api.delete_registros()),
                on_result=done, on_error=self._err)
+
+class ProgressProxy(QObject):
+    progress = Signal(int)  # 0..100
 
 
 class MainWindow(QMainWindow):
@@ -484,25 +499,42 @@ class MainWindow(QMainWindow):
                 ) != QMessageBox.Yes:
                     return
 
-                # Descarga en background
+                # Descarga con barra de progreso (modal)
+                dlg = QProgressDialog("Descargando actualización...", None, 0, 100, self)
+                dlg.setWindowTitle("Actualización")
+                dlg.setCancelButton(None)
+                dlg.setAutoClose(False)
+                dlg.setAutoReset(False)
+                dlg.setMinimumDuration(0)
+                dlg.setValue(0)
+                dlg.show()
+
+                proxy = ProgressProxy()
+                proxy.progress.connect(dlg.setValue)
+
                 def work():
-                    # descarga asset y devuelve la ruta local
-                    return download_and_get_path_sync(latest)
+                    # corremos la corrutina con callback que emite señal thread-safe
+                    return asyncio.run(download_latest_asset(
+                        latest,
+                        progress_cb=lambda p: proxy.progress.emit(int(p))
+                    ))
 
                 def done(path: str):
                     try:
-                        # Lanzar instalador y cerrar app
                         run_installer(path)
                         QMessageBox.information(self, "Actualización",
                                                 "Se lanzó el instalador. La aplicación se cerrará ahora.")
                     except Exception as e:
                         QMessageBox.critical(self, "Actualización", f"No se pudo lanzar el instalador:\n{e}")
+                        dlg.close()
                         return
-                    # cerrar UI
+                    dlg.close()
                     from PySide6.QtWidgets import QApplication
                     QApplication.quit()
 
-                run_bg(work, on_result=done, on_error=lambda err: QMessageBox.critical(self, "Actualización", err))
+                run_bg(work,
+                    on_result=done,
+                    on_error=lambda err: (dlg.close(), QMessageBox.critical(self, "Actualización", err)))
 
             except Exception as e:
                 QMessageBox.warning(self, "Actualizaciones", f"No se pudo verificar:\n{e}")

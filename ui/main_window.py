@@ -22,6 +22,10 @@ from PySide6.QtWidgets import (
     QFormLayout,
     QGroupBox,
     QAbstractItemView,
+    QRadioButton,
+    QCheckBox,
+    QTextEdit,
+    QDialog,
 )
 
 from core.api import ApiClient
@@ -31,6 +35,8 @@ from core.updater import check_update, download_and_get_path_sync, run_installer
 from ui.about import AboutDialog
 
 from PySide6.QtCore import Signal
+from core.config import Config
+
 
 
 # flake8: noqa: E701,E702
@@ -108,6 +114,182 @@ class GraficoTab(QWidget):
         self.canvas.draw()
 
 
+class StatusViewDialog(QDialog):
+    """Dialogo formateado para mostrar el /status de la API."""
+    def __init__(self, data: dict, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Estado del servidor")
+        self.resize(560, 420)
+
+        lay = QVBoxLayout(self)
+
+        # --- resumen clave-valor (si existen)
+        api_name        = data.get("api_name", "—")
+        version     = data.get("version", "—")
+        status       = data.get("status", "—")
+        hostname    = data.get("server_name", "—")
+        server_time = data.get("server_time", data.get("time", "—"))
+
+        resumen_html = (
+            f"<h3 style='margin:0'>FAdeAPI</h3>"
+            f"<div style='margin-top:6px'>"
+            f"<b>Nombre de la API:</b> {api_name}<br>"
+            f"<b>Versión:</b> {version}<br>"
+            f"<b>Estado:</b> {status}<br>"
+            f"<b>Hostname:</b> {hostname}<br>"
+            f"<b>Hora del servidor:</b> {server_time}"
+            f"</div>"
+        )
+        lay.addWidget(QLabel(resumen_html))
+
+        # --- JSON completo, bonito y scrolleable
+        import json
+        raw = QTextEdit()
+        raw.setReadOnly(True)
+        raw.setFontFamily("Consolas, Menlo, monospace")
+        raw.setPlainText(json.dumps(data, indent=2, ensure_ascii=False))
+        lay.addWidget(raw)
+
+        btns = QHBoxLayout()
+        btn_cerrar = QPushButton("Cerrar")
+        btn_cerrar.clicked.connect(self.accept)
+        btns.addStretch(1); btns.addWidget(btn_cerrar)
+        lay.addLayout(btns)
+
+
+class ConfigTab(QWidget):
+    
+    theme_changed = Signal(str)   # "light" | "dark"
+    
+    """Preferencias del usuario."""
+    def __init__(self):
+        super().__init__()
+        self.cfg = Config()
+
+        # === API destino ===
+        grp_api = QGroupBox("API destino")
+        self.rb_cloud = QRadioButton("Cloud ☁")
+        self.rb_localhost = QRadioButton(f"Localhost ({self.cfg.localhost_url()})")
+        self.rb_custom    = QRadioButton("Personalizada")
+        self.ed_custom    = QLineEdit(); self.ed_custom.setPlaceholderText("https://mi-servidor/api/ ...")
+
+        env = self.cfg.get_api_env()
+        if env == "localhost":
+            self.rb_localhost.setChecked(True)
+        elif env == "custom":
+            self.rb_custom.setChecked(True)
+            self.ed_custom.setText(self.cfg.base_url())
+        else:
+            self.rb_cloud.setChecked(True)
+
+        # Habilitar campo custom only si corresponde
+        def _toggle_custom():
+            self.ed_custom.setEnabled(self.rb_custom.isChecked())
+        _toggle_custom()
+        self.rb_custom.toggled.connect(_toggle_custom)
+
+        lay_api = QFormLayout()
+        lay_api.addRow(self.rb_cloud)
+        lay_api.addRow(self.rb_localhost)
+        lay_api.addRow(self.rb_custom, self.ed_custom)
+        grp_api.setLayout(lay_api)
+
+        # === Preferencias varias ===
+        grp_prefs = QGroupBox("Preferencias")
+        self.cb_auto_update = QCheckBox("Buscar actualizaciones al iniciar")
+        self.cb_auto_update.setChecked(self.cfg.get_auto_check_updates())
+
+        self.sp_limit = QSpinBox(); self.sp_limit.setRange(1, 1_000_000); self.sp_limit.setValue(self.cfg.get_default_limit())
+        self.sp_rem   = QSpinBox(); self.sp_rem.setRange(1, 365); self.sp_rem.setValue(self.cfg.get_remember_days_default())
+
+        lay_prefs = QFormLayout()
+        lay_prefs.addRow("Límite por defecto (Registros)", self.sp_limit)
+        lay_prefs.addRow("Recordarme (días)", self.sp_rem)
+        lay_prefs.addRow(self.cb_auto_update)
+        grp_prefs.setLayout(lay_prefs)
+        
+        # === Tema ===
+        grp_theme = QGroupBox("Tema de la interfaz")
+        self.rb_light = QRadioButton("Claro")
+        self.rb_dark = QRadioButton("Oscuro")
+
+        theme = self.cfg.get_theme()
+        if theme == "dark":
+            self.rb_dark.setChecked(True)
+        else:
+            self.rb_light.setChecked(True)
+
+        lay_theme = QVBoxLayout()
+        lay_theme.addWidget(self.rb_light)
+        lay_theme.addWidget(self.rb_dark)
+        grp_theme.setLayout(lay_theme)
+
+
+        # === Botones ===
+        btn_save = QPushButton("Guardar")
+        btn_test = QPushButton("Probar /status")
+
+        btn_save.clicked.connect(self._save)
+        btn_test.clicked.connect(self._test_status)
+
+        # === Layout principal ===
+        root = QVBoxLayout(self)
+        root.addWidget(grp_api)
+        root.addWidget(grp_prefs)
+        root.addWidget(grp_theme)
+
+
+        row = QHBoxLayout()
+        row.addStretch(1)
+        row.addWidget(btn_test)
+        row.addWidget(btn_save)
+        root.addLayout(row)
+        root.addStretch(1)
+
+    def _save(self):
+        # API env + base_url
+        if self.rb_cloud.isChecked():
+            self.cfg.set_api_env("cloud")
+            self.cfg.set_base_url(self.cfg.cloud_url())
+        elif self.rb_localhost.isChecked():
+            self.cfg.set_api_env("localhost")
+            self.cfg.set_base_url(self.cfg.localhost_url())
+        else:
+            url = (self.ed_custom.text() or "").strip()
+            if not url:
+                QMessageBox.warning(self, "Configuración", "Ingresá una URL para el modo personalizado.")
+                return
+            self.cfg.set_api_env("custom")
+            self.cfg.set_base_url(url)
+
+        # Prefs
+        self.cfg.set_auto_check_updates(self.cb_auto_update.isChecked())
+        self.cfg.set_default_limit(int(self.sp_limit.value()))
+        self.cfg.set_remember_days_default(int(self.sp_rem.value()))
+        # Tema
+        theme = "dark" if self.rb_dark.isChecked() else "light"
+        self.cfg.set_theme(theme)
+        self.theme_changed.emit(theme)   # 👈 avisamos al resto de la app
+
+
+        QMessageBox.information(self, "Configuración", "Preferencias guardadas.\nLos cambios aplican a nuevas conexiones.")
+
+    def _test_status(self):
+        # pequeño test síncrono usando httpx (sin ApiClient para no depender de auth)
+        try:
+            import httpx
+            url = self.cfg.base_url()
+            with httpx.Client(base_url=url, timeout=10, follow_redirects=True) as c:
+                r = c.get("status")
+                r.raise_for_status()
+                data = r.json() if r.headers.get("content-type","").startswith("application/json") else {"raw": r.text}
+            # Mostrar con formato lindo
+            dlg = StatusViewDialog(data, self)
+            dlg.exec()
+        except Exception as e:
+            QMessageBox.critical(self, "Status ERROR", str(e))
+
+
 
 class RegistrosTab(QWidget):
     """Pestaña de registros: SOLO la tabla. Emite señal con los datos para el gráfico."""
@@ -125,7 +307,10 @@ class RegistrosTab(QWidget):
         self.table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
 
         # --- Controles ---
-        self.limit = QSpinBox(); self.limit.setRange(1, 1_000_000); self.limit.setValue(10_000)
+        self.limit = QSpinBox()
+        self.limit.setRange(1, 1_000_000)
+        # self.limit.setValue(10_000)
+        self.limit.setValue(Config().get_default_limit())
         self.hasta = QLineEdit(); self.hasta.setPlaceholderText("YYYY-MM-DDTHH:MM:SS (opcional)")
 
         btn_refresh = QPushButton("Actualizar (incremental)")
@@ -229,9 +414,6 @@ class RegistrosTab(QWidget):
                on_result=done, on_error=self._err)
 
 
-
-
-
 class MainWindow(QMainWindow):
     def __init__(self, username: str, on_logout=None):
         """Crea la ventana principal de la aplicación.
@@ -251,13 +433,18 @@ class MainWindow(QMainWindow):
         tabs = QTabWidget()
         self.reg_tab = RegistrosTab(self.api)
         self.graph_tab = GraficoTab()
+        config_tab = ConfigTab()
+        
         # Conectar: cuando llegan/ cambian datos en "Registros", actualizamos "Gráfico"
         self.reg_tab.data_updated.connect(self.graph_tab.update_plot)
+        config_tab.theme_changed.connect(lambda _: self._apply_theme())
+        
+        self._apply_theme()
 
-        tabs.addTab(self._build_status_tab(), "Status")
         tabs.addTab(self.reg_tab, "Registros")
         tabs.addTab(self.graph_tab, "Gráfico")
         tabs.addTab(UsuariosTab(self.api), "Usuarios (admin)")
+        tabs.addTab(ConfigTab(), "Configuración")
 
         about_btn = QPushButton("Acerca de")
         about_btn.clicked.connect(lambda: AboutDialog().exec())
@@ -331,28 +518,44 @@ class MainWindow(QMainWindow):
         
         self.setCentralWidget(c)
         
+        # Auto-check de actualizaciones al iniciar
+        if Config().get_auto_check_updates():
+            def _silent_check():
+                try:
+                    hay, latest = asyncio.run(check_update(VERSION))
+                    if hay:
+                        # Notificación muy sutil (no intrusiva)
+                        QMessageBox.information(self, "Actualización disponible",
+                            f"Hay una nueva versión: {latest}.\nUsá el botón 'Buscar actualizaciones' para descargarla.")
+                except Exception:
+                    pass
+                
+            run_bg(_silent_check)
+        
+    def _apply_theme(self):
+            theme = Config().get_theme()
+            if theme == "dark":
+                dark_palette = self._make_dark_palette()
+                self.setPalette(dark_palette)
+            else:
+                self.setPalette(self.style().standardPalette())
 
-    def _build_status_tab(self):
-        """Construye y devuelve la pestaña de estado del servidor.
-
-        Incluye un botón para consultar /status y una etiqueta para mostrar la respuesta.
-
-        Returns:
-            QWidget: Contenedor con controles de la pestaña de estado.
-        """
-        w = QWidget(); lay = QVBoxLayout(w)
-        label = QLabel("Servidor: (sin consultar)")
-        btn = QPushButton("Consultar /status")
-        async def do_status():
-            try:
-                r = await self.api.request("GET", "status")
-                data = r.json()
-                label.setText(str(data))
-            except Exception as e:
-                QMessageBox.critical(self, "Error", str(e))
-        btn.clicked.connect(lambda: asyncio.run(do_status()))
-        lay.addWidget(btn); lay.addWidget(label)
-        return w
+    def _make_dark_palette(self):
+        from PySide6.QtGui import QPalette, QColor
+        palette = QPalette()
+        palette.setColor(QPalette.Window, QColor(53, 53, 53))
+        palette.setColor(QPalette.WindowText, QColor(255, 255, 255))
+        palette.setColor(QPalette.Base, QColor(35, 35, 35))
+        palette.setColor(QPalette.AlternateBase, QColor(53, 53, 53))
+        palette.setColor(QPalette.ToolTipBase, QColor(255, 255, 255))
+        palette.setColor(QPalette.ToolTipText, QColor(255, 255, 255))
+        palette.setColor(QPalette.Text, QColor(255, 255, 255))
+        palette.setColor(QPalette.Button, QColor(53, 53, 53))
+        palette.setColor(QPalette.ButtonText, QColor(255, 255, 255))
+        palette.setColor(QPalette.BrightText, QColor(255, 0, 0))
+        palette.setColor(QPalette.Highlight, QColor(42, 130, 218))
+        palette.setColor(QPalette.HighlightedText, QColor(0, 0, 0))
+        return palette
 
 
 class UsuariosTab(QWidget):

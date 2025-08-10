@@ -4,7 +4,9 @@ from core.config import Config
 import asyncio
 from datetime import datetime, timezone
 
-REMEMBER_DAYS_DEFAULT = 30
+
+REMEMBER_DAYS_DEFAULT = Config().get_remember_days_default()
+
 
 
 class LoginDialog(QDialog):

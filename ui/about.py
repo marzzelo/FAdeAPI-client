@@ -6,10 +6,11 @@ class AboutDialog(QDialog):
         super().__init__()
         self.setWindowTitle("Acerca de FADEAPI Client")
         t = (
-            f"<b>FADEAPI Client v{VERSION}</b><br>"
-            "Autor: Marcelo A. Valdez · Contacto: <i>valdez@fadeasa.com.ar</i><br>"
+            f"<h1>FADEAPI Client v{VERSION}</h1><br>"
+            "Autor: <b>Marcelo A. Valdez</b> · Contacto: <i>valdez@fadeasa.com.ar</i><br>"
             "Colabora: <i>Arisa</i><br>"
-            "© FAdeA - Todos los Derechos reservados"
+            "Actualizaciones: descarga directa disponible desde el cliente.<br>"
+            "<i>© FAdeA - Todos los Derechos reservados</i>"
         )
         lay = QVBoxLayout(self)
         lay.addWidget(QLabel(t))

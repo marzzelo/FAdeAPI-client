@@ -4,3 +4,13 @@ py -m PyInstaller app.py -n FADEAPI-Client --onedir --windowed --clean --icon as
 
 AUTOUPDATE:
 Flujo: cuando publiques un Release en el repo del cliente (subí el .exe/installer), poné un tag v0.1.1 y listo: el cliente lo detecta y abre la página.
+
+
+FLUJO PARA GITHUB ACTIONS:
+
+# editar core/__version__.py a "0.2.1"
+git add core/__version__.py
+git commit -m "Bump version to 0.2.1"
+git tag v0.2.1
+git push origin main
+git push origin v0.2.1

@@ -27,7 +27,7 @@ from PySide6.QtWidgets import (
 from core.api import ApiClient
 from core.workers import run_bg
 from core.__version__ import VERSION
-from core.updater import check_update, open_release
+from core.updater import check_update, download_and_get_path_sync, run_installer
 from ui.about import AboutDialog
 
 from PySide6.QtCore import Signal
@@ -259,11 +259,9 @@ class MainWindow(QMainWindow):
         tabs.addTab(self.graph_tab, "Gráfico")
         tabs.addTab(UsuariosTab(self.api), "Usuarios (admin)")
 
-
         about_btn = QPushButton("Acerca de")
         about_btn.clicked.connect(lambda: AboutDialog().exec())
 
-        update_btn = QPushButton("Buscar actualizaciones")
         logout_btn = QPushButton("Cerrar sesión")
         
         def _logout():
@@ -283,23 +281,46 @@ class MainWindow(QMainWindow):
                 self.close()
 
         logout_btn.clicked.connect(_logout)
-        
 
-        def _check_updates():
+        update_btn = QPushButton("Buscar actualizaciones")
+
+        def _do_update_check_and_run():
             try:
-                hay, latest, url = asyncio.run(check_update(VERSION))
-                if hay:
-                    if QMessageBox.question(
-                        self, "Actualización disponible",
-                        f"Versión instalada: {VERSION}\nÚltima versión: {latest}\n\n¿Abrir la página de descarga?"
-                    ) == QMessageBox.Yes:
-                        open_release(url)
-                else:
-                    QMessageBox.information(self, "Actualizaciones", "Estás en la última versión.")
+                hay, latest = asyncio.run(check_update(VERSION))
+                if not hay:
+                    QMessageBox.information(self, "Actualizaciones", f"Estás en la última versión ({VERSION}).")
+                    return
+
+                if QMessageBox.question(
+                    self, "Actualizar",
+                    f"Versión instalada: {VERSION}\nNueva versión disponible: {latest}\n\n¿Descargar e instalar ahora?"
+                ) != QMessageBox.Yes:
+                    return
+
+                # Descarga en background
+                def work():
+                    # descarga asset y devuelve la ruta local
+                    return download_and_get_path_sync(latest)
+
+                def done(path: str):
+                    try:
+                        # Lanzar instalador y cerrar app
+                        run_installer(path)
+                        QMessageBox.information(self, "Actualización",
+                                                "Se lanzó el instalador. La aplicación se cerrará ahora.")
+                    except Exception as e:
+                        QMessageBox.critical(self, "Actualización", f"No se pudo lanzar el instalador:\n{e}")
+                        return
+                    # cerrar UI
+                    from PySide6.QtWidgets import QApplication
+                    QApplication.quit()
+
+                run_bg(work, on_result=done, on_error=lambda err: QMessageBox.critical(self, "Actualización", err))
+
             except Exception as e:
                 QMessageBox.warning(self, "Actualizaciones", f"No se pudo verificar:\n{e}")
 
-        update_btn.clicked.connect(_check_updates)
+        update_btn.clicked.connect(_do_update_check_and_run)
 
         c = QWidget(); lay = QVBoxLayout(c)
         
@@ -309,8 +330,6 @@ class MainWindow(QMainWindow):
         lay.addWidget(logout_btn)     
         
         self.setCentralWidget(c)
-        
-        
         
 
     def _build_status_tab(self):

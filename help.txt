@@ -1,5 +1,6 @@
-$>  pipenv run pyinstaller --noconfirm --onedir --windowed --name "FADEAPI-Client" --icon assets\icon.ico --collect-submodules PySide6 --collect-data PySide6 --collect-data pyqtgraph app.py
-# This command builds the FADEAPI-Client application using PyInstaller with the specified options.
+py -m pip install -r requirements.txt
+py -m pip install pyinstaller
+py -m PyInstaller app.py -n FADEAPI-Client --onedir --windowed --clean --icon assets/icon.ico --collect-submodules PySide6 --collect-data PySide6 --collect-data matplotlib --collect-data pyqtgraph
 
 AUTOUPDATE:
 Flujo: cuando publiques un Release en el repo del cliente (subí el .exe/installer), poné un tag v0.1.1 y listo: el cliente lo detecta y abre la página.

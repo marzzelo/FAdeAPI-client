@@ -5,6 +5,8 @@ from PyInstaller.utils.hooks import collect_submodules
 datas = []
 hiddenimports = []
 datas += collect_data_files('PySide6')
+datas += collect_data_files('matplotlib')
+datas += collect_data_files('pyqtgraph')
 hiddenimports += collect_submodules('PySide6')
 
 

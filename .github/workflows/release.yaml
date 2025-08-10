@@ -1,0 +1,132 @@
+name: Build & Release (Windows)
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+jobs:
+  build-win:
+    runs-on: windows-latest
+
+    env:
+      APP_NAME: FADEAPI-Client
+      PYTHON_VERSION: "3.11"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~\AppData\Local\pip\Cache
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+          restore-keys: ${{ runner.os }}-pip-
+
+      - name: Install deps
+        run: |
+          python -m pip install -U pip wheel
+          if (Test-Path "requirements.txt") {
+            python -m pip install -r requirements.txt
+          } else {
+            python -m pip install pyqtgraph PySide6 matplotlib httpx keyring truststore packaging numpy tzdata
+          }
+          python -m pip install pyinstaller
+
+      - name: Show versions
+        run: |
+          python -V
+          pip freeze
+
+      - name: Extract version from core/__version__.py
+        id: ver
+        shell: python
+        run: |
+          import re, sys, pathlib, os
+          p = pathlib.Path("core/__version__.py")
+          m = re.search(r'VERSION\s*=\s*"([^"]+)"', p.read_text())
+          v = m.group(1) if m else "0.0.0"
+          print(f"::set-output name=version::{v}")
+        # set-output es legacy; usar $GITHUB_OUTPUT:
+        # run: |
+        #  ...; open(os.environ["GITHUB_OUTPUT"],"a").write(f"version={v}\n")
+
+      - name: Verify tag matches version
+        shell: bash
+        run: |
+          TAG="${GITHUB_REF_NAME}"           # e.g. v0.1.2
+          VER="${{ steps.ver.outputs.version }}"
+          TAG_STRIPPED="${TAG#v}"
+          echo "Tag: $TAG  Version: $VER"
+          if [ "$TAG_STRIPPED" != "$VER" ]; then
+            echo "Tag ($TAG_STRIPPED) != core/__version__.py ($VER)"; exit 1;
+          fi
+
+      - name: Build (PyInstaller)
+        run: |
+          python -m PyInstaller app.py `
+            -n $env:APP_NAME `
+            --onedir --windowed --clean `
+            --icon assets/icon.ico `
+            --collect-submodules PySide6 `
+            --collect-data PySide6 `
+            --collect-data matplotlib `
+            --collect-data pyqtgraph
+
+      - name: Zip onedir
+        shell: pwsh
+        run: |
+          $ver = "${{ steps.ver.outputs.version }}"
+          $zipName = "$env:APP_NAME" + "_v" + $ver + "_win64.zip"
+          Compress-Archive -Path "dist/$env:APP_NAME/*" -DestinationPath $zipName
+          echo "Zipped: $zipName"
+          echo "ZIP_NAME=$zipName" >> $env:GITHUB_ENV
+
+            - name: Install Inno Setup
+        shell: pwsh
+        run: choco install innosetup -y
+
+      - name: Build Installer (Inno Setup)
+        shell: pwsh
+        run: |
+          $ver = "${{ steps.ver.outputs.version }}"
+          # Pasar la versión al script con /DAppVersion
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" `
+            "/DAppVersion=$ver" `
+            "installer\FADEAPI-Client.iss"
+          # Mover el .exe de Output a raíz del workspace
+          Get-ChildItem -Path installer\Output\*.exe | Copy-Item -Destination .
+
+
+      - name: Upload build artifact (CI)
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.APP_NAME }}-win64
+          path: ${{ env.ZIP_NAME }}
+
+  release:
+    needs: build-win
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: FADEAPI-Client-win64
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            *.zip
+            *.exe
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

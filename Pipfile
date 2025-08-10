@@ -12,6 +12,7 @@ packaging = "*"
 pyqtgraph = "*"
 numpy = "*"
 matplotlib = "*"
+tzdata = "*"
 
 [dev-packages]
 pyinstaller = "*"

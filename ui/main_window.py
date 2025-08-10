@@ -1,7 +1,7 @@
 # ui/main_window.py
 import asyncio
 from datetime import datetime, timezone, timedelta
-
+from zoneinfo import ZoneInfo  # Python 3.9+; en Windows conviene instalar 'tzdata'
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
 import matplotlib.dates as mdates
@@ -31,10 +31,6 @@ from core.updater import check_update, open_release
 from ui.about import AboutDialog
 
 from PySide6.QtCore import Signal
-# Mantén también los imports de Matplotlib que ya agregamos:
-from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
-from matplotlib.figure import Figure
-import matplotlib.dates as mdates
 
 
 # flake8: noqa: E701,E702
@@ -59,7 +55,9 @@ class GraficoTab(QWidget):
         return dt
 
     def update_plot(self, data: list[dict]):
-        """Redibuja todas las series con los datos provistos."""
+        """Redibuja todas las series con los datos provistos (timezone Córdoba)."""
+        tz = ZoneInfo("America/Argentina/Cordoba")
+
         self.fig.clear()
         ax = self.fig.add_subplot(111)
 
@@ -75,9 +73,11 @@ class GraficoTab(QWidget):
             self.canvas.draw()
             return
 
-        x_dt = [self._parse_iso(r["ts"]) for r in data]
-        x_num = mdates.date2num(x_dt)
+        # Timestamps → datetime local Córdoba
+        x_dt_local = [self._parse_iso(r["ts"]).astimezone(tz) for r in data]
+        x_num = mdates.date2num(x_dt_local)
 
+        # Curvas
         for idx in range(max_s):
             y_vals = []
             for r in data:
@@ -85,15 +85,18 @@ class GraficoTab(QWidget):
                 y_vals.append(sensores[idx] if idx < len(sensores) else None)
             ax.plot_date(x_num, y_vals, "-", marker="o", label=f"s{idx+1}")
 
-        ax.xaxis.set_major_formatter(mdates.DateFormatter("%H:%M:%S"))
-        self.fig.autofmt_xdate()
+        # Formato de fechas: locator+Concise para que no ensucie
+        locator = mdates.AutoDateLocator(tz=tz)
+        formatter = mdates.ConciseDateFormatter(locator, tz=tz)
+        ax.xaxis.set_major_locator(locator)
+        ax.xaxis.set_major_formatter(formatter)
 
         ax.set_ylabel("Valor")
-        ax.set_xlabel("Tiempo")
+        ax.set_xlabel("Tiempo (Córdoba)")
         ax.grid(True)
         ax.legend()
 
-        # Padding Y suave
+        # Padding Y
         try:
             ymin, ymax = ax.get_ybound()
             if ymin == ymax:
@@ -103,6 +106,7 @@ class GraficoTab(QWidget):
             pass
 
         self.canvas.draw()
+
 
 
 class RegistrosTab(QWidget):
@@ -229,7 +233,7 @@ class RegistrosTab(QWidget):
 
 
 class MainWindow(QMainWindow):
-    def __init__(self, username: str):
+    def __init__(self, username: str, on_logout=None):
         """Crea la ventana principal de la aplicación.
 
         Configura las pestañas (Status, Registros, Usuarios), el diálogo Acerca de y
@@ -239,13 +243,14 @@ class MainWindow(QMainWindow):
             username (str): Nombre de usuario autenticado para inicializar el ApiClient.
         """
         super().__init__()
-        self.setWindowTitle("FADEAPI Client")
+        self.setWindowTitle("FAdeAPI Client")
+        self.username = username              # 👈 guardamos usuario actual
+        self.on_logout = on_logout            # 👈 callback para volver al login
         self.api = ApiClient(username)
 
         tabs = QTabWidget()
         self.reg_tab = RegistrosTab(self.api)
         self.graph_tab = GraficoTab()
-
         # Conectar: cuando llegan/ cambian datos en "Registros", actualizamos "Gráfico"
         self.reg_tab.data_updated.connect(self.graph_tab.update_plot)
 
@@ -259,6 +264,26 @@ class MainWindow(QMainWindow):
         about_btn.clicked.connect(lambda: AboutDialog().exec())
 
         update_btn = QPushButton("Buscar actualizaciones")
+        logout_btn = QPushButton("Cerrar sesión")
+        
+        def _logout():
+            from core.auth import delete_tokens
+            from core.config import Config
+            try:
+                delete_tokens(self.username)
+                Config().clear_remember(self.username)
+            except Exception:
+                pass
+            QMessageBox.information(self, "Sesión cerrada", "Se cerró la sesión. Volverás a la pantalla de login.")
+            # cerrar esta ventana y disparar callback
+            if callable(self.on_logout):
+                self.close()
+                self.on_logout()
+            else:
+                self.close()
+
+        logout_btn.clicked.connect(_logout)
+        
 
         def _check_updates():
             try:
@@ -277,10 +302,15 @@ class MainWindow(QMainWindow):
         update_btn.clicked.connect(_check_updates)
 
         c = QWidget(); lay = QVBoxLayout(c)
-        lay.addWidget(tabs); lay.addWidget(about_btn)
+        
+        lay.addWidget(tabs)
+        lay.addWidget(about_btn)
         lay.addWidget(update_btn)
+        lay.addWidget(logout_btn)     
+        
         self.setCentralWidget(c)
-
+        
+        
         
 
     def _build_status_tab(self):

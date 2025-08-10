@@ -32,10 +32,10 @@ from PySide6.QtWidgets import (
 from core.api import ApiClient
 from core.workers import run_bg
 from core.__version__ import VERSION
-from core.updater import check_update, download_and_get_path_sync, download_latest_asset, run_installer
+from core.updater import check_update, download_latest_asset, run_installer
 from ui.about import AboutDialog
 
-from PySide6.QtCore import Signal, QObject
+from PySide6.QtCore import Signal, QObject, Qt, QTimer
 from core.config import Config
 
 
@@ -52,6 +52,7 @@ class GraficoTab(QWidget):
         lay = QVBoxLayout(self)
         lay.setContentsMargins(6, 6, 6, 6)
         lay.addWidget(self.canvas)
+        
 
     @staticmethod
     def _parse_iso(ts_str: str) -> datetime:
@@ -492,50 +493,8 @@ class MainWindow(QMainWindow):
                 if not hay:
                     QMessageBox.information(self, "Actualizaciones", f"Estás en la última versión ({VERSION}).")
                     return
-
-                if QMessageBox.question(
-                    self, "Actualizar",
-                    f"Versión instalada: {VERSION}\nNueva versión disponible: {latest}\n\n¿Descargar e instalar ahora?"
-                ) != QMessageBox.Yes:
-                    return
-
-                # Descarga con barra de progreso (modal)
-                dlg = QProgressDialog("Descargando actualización...", None, 0, 100, self)
-                dlg.setWindowTitle("Actualización")
-                dlg.setCancelButton(None)
-                dlg.setAutoClose(False)
-                dlg.setAutoReset(False)
-                dlg.setMinimumDuration(0)
-                dlg.setValue(0)
-                dlg.show()
-
-                proxy = ProgressProxy()
-                proxy.progress.connect(dlg.setValue)
-
-                def work():
-                    # corremos la corrutina con callback que emite señal thread-safe
-                    return asyncio.run(download_latest_asset(
-                        latest,
-                        progress_cb=lambda p: proxy.progress.emit(int(p))
-                    ))
-
-                def done(path: str):
-                    try:
-                        run_installer(path)
-                        QMessageBox.information(self, "Actualización",
-                                                "Se lanzó el instalador. La aplicación se cerrará ahora.")
-                    except Exception as e:
-                        QMessageBox.critical(self, "Actualización", f"No se pudo lanzar el instalador:\n{e}")
-                        dlg.close()
-                        return
-                    dlg.close()
-                    from PySide6.QtWidgets import QApplication
-                    QApplication.quit()
-
-                run_bg(work,
-                    on_result=done,
-                    on_error=lambda err: (dlg.close(), QMessageBox.critical(self, "Actualización", err)))
-
+                # Mostrar el prompt SIEMPRE en el hilo UI, al frente
+                QTimer.singleShot(0, lambda: self._prompt_update(latest))
             except Exception as e:
                 QMessageBox.warning(self, "Actualizaciones", f"No se pudo verificar:\n{e}")
 
@@ -552,17 +511,79 @@ class MainWindow(QMainWindow):
         
         # Auto-check de actualizaciones al iniciar
         if Config().get_auto_check_updates():
-            def _silent_check():
+            def work():
+                return asyncio.run(check_update(VERSION))
+            def done(res):
                 try:
-                    hay, latest = asyncio.run(check_update(VERSION))
+                    hay, latest = res
                     if hay:
-                        # Notificación muy sutil (no intrusiva)
-                        QMessageBox.information(self, "Actualización disponible",
-                            f"Hay una nueva versión: {latest}.\nUsá el botón 'Buscar actualizaciones' para descargarla.")
+                        # O mostrar prompt directo:
+                        # QTimer.singleShot(0, lambda: self._prompt_update(latest))
+                        # …o aviso suave:
+                        QTimer.singleShot(0, lambda: QMessageBox.information(
+                            self, "Actualización disponible",
+                            f"Hay una nueva versión: {latest}.\nUsá el botón 'Buscar actualizaciones' para descargarla."
+                        ))
                 except Exception:
                     pass
-                
-            run_bg(_silent_check)
+            run_bg(work, on_result=done, on_error=lambda e: None)
+            
+        QTimer.singleShot(0, lambda: (self.raise_(), self.activateWindow()))
+
+            
+    def _prompt_update(self, latest: str):
+        # Popup en hilo UI, modal y al frente
+        box = QMessageBox(self)
+        box.setWindowTitle("Actualización disponible")
+        box.setText(f"Versión instalada: {VERSION}\nNueva versión: {latest}\n\n¿Descargar e instalar ahora?")
+        box.setIcon(QMessageBox.Information)
+        box.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
+        box.setWindowModality(Qt.WindowModality.WindowModal)
+        box.raise_()
+        box.activateWindow()
+        if box.exec() == QMessageBox.Yes:
+            self._download_and_install(latest)
+
+    def _download_and_install(self, latest: str):
+        # Barra de progreso modal, visible y encima
+        dlg = QProgressDialog("Descargando actualización...", None, 0, 100, self)
+        dlg.setWindowTitle("Actualización")
+        dlg.setCancelButton(None)
+        dlg.setAutoClose(False)
+        dlg.setAutoReset(False)
+        dlg.setMinimumDuration(0)
+        dlg.setWindowModality(Qt.WindowModality.ApplicationModal)
+        dlg.setValue(0)
+        dlg.raise_()
+        dlg.activateWindow()
+        dlg.show()
+
+        proxy = ProgressProxy()
+        proxy.progress.connect(dlg.setValue)
+
+        def work():
+            # descarga con callbacks de progreso
+            return asyncio.run(download_latest_asset(
+                latest,
+                progress_cb=lambda p: proxy.progress.emit(int(p))
+            ))
+
+        def done(path: str):
+            try:
+                run_installer(path)
+                QMessageBox.information(self, "Actualización",
+                                        "Se lanzó el instalador. La aplicación se cerrará ahora.")
+                from PySide6.QtWidgets import QApplication
+                QApplication.quit()  # 👈 sólo cerramos si REALMENTE lanzamos instalador
+            except Exception as e:
+                QMessageBox.critical(self, "Actualización", f"No se pudo lanzar el instalador:\n{e}")
+            finally:
+                dlg.close()
+
+        run_bg(work,
+            on_result=done,
+            on_error=lambda err: (dlg.close(), QMessageBox.critical(self, "Actualización", err)))
+
         
     def _apply_theme(self):
             theme = Config().get_theme()

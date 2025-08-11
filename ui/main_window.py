@@ -2,7 +2,7 @@
 import asyncio
 from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo  # Python 3.9+; en Windows conviene instalar 'tzdata'
-from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
+from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
 import matplotlib.dates as mdates
 from PySide6.QtWidgets import (

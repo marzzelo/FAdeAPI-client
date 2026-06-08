@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(heroku logs *)",
+      "PowerShell(heroku run --app fadeapi -- python -c \"import os; print\\('DB:', os.environ.get\\('DATABASE_URL', 'NOT SET'\\)[:50]\\)\" 2>&1)"
+    ]
+  }
+}
